@@ -1,0 +1,10 @@
+= The input is output as is =
+= Usage: cargo run -- examples/echo.flap =
+= Input: x (number) =
+= Output: x (number) =
+
+= While =
+1[
+    rp  = echo =
+    10P = newline =
+]

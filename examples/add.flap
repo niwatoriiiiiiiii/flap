@@ -1,0 +1,8 @@
+= Add two numbers =
+= Usage: cargo run -- examples/add.flap =
+= Input: x y =
+= Output: x + y =
+
+rr+  = x + y =
+p    = print =
+10P  = newline =

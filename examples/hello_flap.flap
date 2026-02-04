@@ -1,0 +1,18 @@
+= Hello, Flap! =
+= Usage: cargo run -- examples/hello_flap.flap =
+
+72  = H =
+101 = e =
+108 = l =
+108 = l =
+111 = o =
+44  = , =
+32  =   =
+70  = F =
+108 = l =
+97  = a =
+112 = p =
+33  = ! =
+
+R   = Rev =
+[P] = Print =
