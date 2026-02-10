@@ -117,7 +117,27 @@ time_check_interval = 1000
     let main_flap = "src/main.flap";
     if !Path::new(main_flap).exists() {
         let code = r#"
-10, 20 + p
+= Flap v1.1.2 =
+
+= Hello, Flap! =
+= Usage: flap run =
+
+72  = H =
+101 = e =
+108 = l =
+108 = l =
+111 = o =
+44  = , =
+32  =   =
+70  = F =
+108 = l =
+97  = a =
+112 = p =
+33  = ! =
+0   = end =
+
+R   = Rev =
+[P] = Print =
 "#;
         if let Err(e) = fs::write(main_flap, code.trim_start()) {
             println!("{} {}", "Error creating src/main.flap:".red(), e);
