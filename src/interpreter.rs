@@ -1,5 +1,5 @@
 use crate::lexer::Token;
-use std::io::{Read, Write};
+use std::io::{BufRead, Write};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, PartialEq)]
@@ -60,7 +60,7 @@ impl std::fmt::Display for ExecutionResult {
 
 impl std::error::Error for RuntimeError {}
 
-pub struct Interpreter<R: Read, W: Write> {
+pub struct Interpreter<R: BufRead, W: Write> {
     stack: Vec<i64>,
     input: R,
     output: W,
@@ -78,7 +78,7 @@ pub struct Interpreter<R: Read, W: Write> {
 // 実行結果とメモリ使用量を返すタプル
 type EvalResult = (ExecutionResult, usize);
 
-impl<R: Read, W: Write> Interpreter<R, W> {
+impl<R: BufRead, W: Write> Interpreter<R, W> {
     pub fn new(input: R, output: W) -> Self {
         Self {
             stack: Vec::new(),
@@ -231,7 +231,7 @@ impl<R: Read, W: Write> Interpreter<R, W> {
         }
     }
 
-    fn execute_command_with_writer<R2: Read, W2: Write>(
+    fn execute_command_with_writer<R2: BufRead, W2: Write>(
         stack: &mut Vec<i64>,
         input: &mut R2,
         cmd: char,
@@ -391,7 +391,7 @@ impl<R: Read, W: Write> Interpreter<R, W> {
         Ok(())
     }
 
-    fn read_number_static<R2: Read>(input: &mut R2) -> Result<i64, RuntimeError> {
+    fn read_number_static<R2: BufRead>(input: &mut R2) -> Result<i64, RuntimeError> {
         let mut word = String::new();
         let mut buffer = [0; 1];
         let mut started = false;
@@ -402,6 +402,16 @@ impl<R: Read, W: Write> Interpreter<R, W> {
                     let c = buffer[0] as char;
                     if c.is_ascii_whitespace() {
                         if started {
+                            // If we hit \r, try to consume \n if present
+                            if c == '\r' {
+                                // Peek next byte
+                                let buf = input
+                                    .fill_buf()
+                                    .map_err(|e| RuntimeError::IoError(e.to_string()))?;
+                                if !buf.is_empty() && buf[0] == b'\n' {
+                                    input.consume(1);
+                                }
+                            }
                             break;
                         }
                     } else {
@@ -418,7 +428,7 @@ impl<R: Read, W: Write> Interpreter<R, W> {
         word.parse().map_err(|_| RuntimeError::InvalidInput)
     }
 
-    fn read_byte_static<R2: Read>(input: &mut R2) -> Result<i64, RuntimeError> {
+    fn read_byte_static<R2: BufRead>(input: &mut R2) -> Result<i64, RuntimeError> {
         let mut buf = [0; 1];
         match input.read(&mut buf) {
             Ok(1) => Ok(buf[0] as i64),
