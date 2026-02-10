@@ -187,10 +187,12 @@ fn run_file(path: &str, config: &Config) {
                     std::process::exit(1);
                 }
                 ExecutionResult::TimeLimitExceeded => {
+                    println!();
                     println!("{}", "Error: Time Limit Exceeded".red());
                     std::process::exit(1);
                 }
                 ExecutionResult::MemoryLimitExceeded => {
+                    println!();
                     println!("{}", "Error: Memory Limit Exceeded".red());
                     std::process::exit(1);
                 }
@@ -269,9 +271,11 @@ fn run_repl(config: &Config) {
                 print_error(&e, trimmed, "REPL", &tokens, interpreter.pc());
             }
             ExecutionResult::TimeLimitExceeded => {
+                println!();
                 println!("{}", "Error: Time Limit Exceeded".red());
             }
             ExecutionResult::MemoryLimitExceeded => {
+                println!();
                 println!("{}", "Error: Memory Limit Exceeded".red());
             }
             _ => {}
