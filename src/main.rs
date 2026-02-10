@@ -241,6 +241,8 @@ fn run_repl(config: &Config) {
                 // Let's just print the top of the stack.
                 if let Some(last) = stack.last() {
                     println!("{}", last);
+                } else {
+                    println!();
                 }
             }
             ExecutionResult::RuntimeError(e) => {

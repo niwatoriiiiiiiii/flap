@@ -54,12 +54,13 @@ Directly manipulates the state of the stack.
 
 ### 3.3 Input/Output
 
-| Command | Name  | Description                                                                                                | Stack Change        |
-| :-----: | :---- | :--------------------------------------------------------------------------------------------------------- | :------------------ |
-|   `r`   | Read  | Read one integer from standard input                                                                       | `-> n`              |
-|   `T`   | Text  | Read one line from standard input and push characters as codes. **The last character ends up at the top.** | `-> c1, c2, ... cn` |
-|   `p`   | Print | Pop an integer and print it to standard output                                                             | `n -> (none)`       |
-|   `P`   | PChar | Pop a character code and print it as a character                                                           | `n -> (none)`       |
+| Command | Name          | Description                                                                                                                      | Stack Change        |
+| :-----: | :------------ | :------------------------------------------------------------------------------------------------------------------------------- | :------------------ |
+|   `r`   | Read Num      | Reads a whitespace-separated number from stdin and pushes it to the stack. Errors if input is not a number. **Pushes 0 on EOF.** | `-> n`              |
+|   `t`   | Readable Char | Reads one local character from stdin and pushes its ASCII code to the stack. **Pushes 0 on EOF.**                                | `-> c`              |
+|   `T`   | Text          | Read one line from standard input and push characters as codes. **The last character ends up at the top.**                       | `-> c1, c2, ... cn` |
+|   `p`   | Print         | Pop an integer and print it to standard output                                                                                   | `n -> (none)`       |
+|   `P`   | PChar         | Pop a character code and print it as a character                                                                                 | `n -> (none)`       |
 
 ---
 
@@ -80,36 +81,6 @@ Controls execution flow based on the state of the stack.
 - When `(` is reached: If the stack top is **non-zero**, execute the block.
 - When `(` is reached: If the stack top is **zero**, jump to the corresponding `)`.
 - **Important**: The condition value is **always popped** once completion/jump happens, regardless of whether the block was executed.
-
----
-
-## 5. Coding Patterns
-
-### 5.1 If-Else Pseudo-implementation
-
-Since there are no comparison operators, subtraction is combined with `if`.
-
-```flap
-= Check if a number is exactly 10 =
-r:10-
-(
-    = Non-zero (not 10) =
-    88P = 'X' =
-    ; 0 = Discard condition, push 0 to skip the next if =
-)
-(
-    = Was 0 (is 10) =
-    79P = 'O' =
-)
-```
-
-### 5.2 Displaying Strings
-
-Since `T` pushes strings such that they are popped in reverse, `R` (Rev) is useful for forward display.
-
-```flap
-0TR[P] = Use 0 as sentinel, reverse, then display until 0 =
-```
 
 ---
 
