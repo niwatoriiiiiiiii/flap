@@ -1,228 +1,448 @@
 use crate::lexer::Token;
-use std::io::{self, Read, Write};
+use std::io::{Read, Write};
+use std::time::{Duration, Instant};
 
-pub struct Interpreter {
-    stack: Vec<i64>,
+#[derive(Debug, PartialEq)]
+pub enum RuntimeError {
+    StackUnderflow,
+    DivisionByZero,
+    IoError(String),
+    InvalidInput,
+    UnmatchedBracket,
+    UnknownCommand(char),
+    OutputLimitExceeded,
 }
 
-impl Interpreter {
-    pub fn new() -> Self {
-        Self { stack: Vec::new() }
+/// 実行結果
+#[derive(Debug, PartialEq)]
+pub enum ExecutionResult {
+    Ok,
+    Running, // To identify partial execution
+    RuntimeError(RuntimeError),
+    TimeLimitExceeded,
+    MemoryLimitExceeded,
+}
+
+// 時間チェック間隔（ステップ数）- Default
+pub const DEFAULT_TIME_CHECK_INTERVAL: u64 = 1_000;
+// デフォルトの制限時間
+pub const DEFAULT_TIME_LIMIT: Duration = Duration::from_millis(2000);
+// 出力制限 (1 MiB)
+pub const MAX_OUTPUT_SIZE: usize = 1024 * 1024;
+// メモリ制限 (1 MiB = 1024 * 1024 bytes)
+pub const MAX_STACK_SIZE: usize = 1024 * 1024 / 8;
+
+impl std::fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RuntimeError::StackUnderflow => write!(f, "Stack underflow"),
+            RuntimeError::DivisionByZero => write!(f, "Division by zero"),
+            RuntimeError::IoError(msg) => write!(f, "I/O error: {}", msg),
+            RuntimeError::InvalidInput => write!(f, "Invalid input"),
+            RuntimeError::UnmatchedBracket => write!(f, "Unmatched bracket"),
+            RuntimeError::UnknownCommand(c) => write!(f, "Unknown command: '{}'", c),
+            RuntimeError::OutputLimitExceeded => write!(f, "Output limit exceeded (max 1MB)"),
+        }
+    }
+}
+
+impl std::fmt::Display for ExecutionResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExecutionResult::Ok => write!(f, "Success"),
+            ExecutionResult::Running => write!(f, "Running"),
+            ExecutionResult::RuntimeError(e) => write!(f, "Runtime Error: {}", e),
+            ExecutionResult::TimeLimitExceeded => write!(f, "Time Limit Exceeded (TLE)"),
+            ExecutionResult::MemoryLimitExceeded => write!(f, "Memory Limit Exceeded (MLE)"),
+        }
+    }
+}
+
+impl std::error::Error for RuntimeError {}
+
+pub struct Interpreter<R: Read, W: Write> {
+    stack: Vec<i64>,
+    input: R,
+    output: W,
+    time_limit: Duration,
+    max_stack_depth: usize,
+    pc: usize,
+    steps: u64,
+    bytes_written: usize,
+    start_time: Option<Instant>,
+    max_stack_size: usize,
+    max_output_size: usize,
+    time_check_interval: u64,
+}
+
+// 実行結果とメモリ使用量を返すタプル
+type EvalResult = (ExecutionResult, usize);
+
+impl<R: Read, W: Write> Interpreter<R, W> {
+    pub fn new(input: R, output: W) -> Self {
+        Self {
+            stack: Vec::new(),
+            input,
+            output,
+            time_limit: DEFAULT_TIME_LIMIT,
+            max_stack_depth: 0,
+            pc: 0,
+            steps: 0,
+            bytes_written: 0,
+            start_time: None,
+            max_stack_size: MAX_STACK_SIZE,
+            max_output_size: MAX_OUTPUT_SIZE,
+            time_check_interval: DEFAULT_TIME_CHECK_INTERVAL,
+        }
+    }
+
+    pub fn with_options(
+        input: R,
+        output: W,
+        time_limit: Duration,
+        max_stack_size: usize,
+        max_output_size: usize,
+        time_check_interval: u64,
+    ) -> Self {
+        Self {
+            stack: Vec::new(),
+            input,
+            output,
+            time_limit,
+            max_stack_depth: 0,
+            pc: 0,
+            steps: 0,
+            bytes_written: 0,
+            start_time: None,
+            max_stack_size,
+            max_output_size,
+            time_check_interval,
+        }
     }
 
     pub fn stack(&self) -> &Vec<i64> {
         &self.stack
     }
 
-    pub fn eval(&mut self, tokens: &[Token]) {
-        let mut pc = 0;
-        while pc < tokens.len() {
-            match &tokens[pc] {
-                Token::Integer(val) => self.stack.push(*val),
-                Token::Command(cmd) => {
-                    self.execute_command(*cmd, tokens, &mut pc);
+    pub fn load_stack(&mut self, stack: Vec<i64>) {
+        self.stack = stack;
+        self.max_stack_depth = self.max_stack_depth.max(self.stack.len());
+    }
+
+    pub fn pc(&self) -> usize {
+        self.pc
+    }
+
+    pub fn output(&self) -> &W {
+        &self.output
+    }
+
+    // 安全にスタックにプッシュする（制限チェック付き）
+    fn push_safe(&mut self, val: i64) -> Result<(), ()> {
+        if self.stack.len() >= self.max_stack_size {
+            return Err(());
+        }
+        self.stack.push(val);
+        self.max_stack_depth = self.max_stack_depth.max(self.stack.len());
+        Ok(())
+    }
+
+    pub fn step(&mut self, tokens: &[Token]) -> ExecutionResult {
+        if self.start_time.is_none() {
+            self.start_time = Some(Instant::now());
+        }
+
+        if self.pc >= tokens.len() {
+            return ExecutionResult::Ok;
+        }
+
+        self.steps += 1;
+
+        if self.steps % self.time_check_interval == 0 {
+            if let Some(start) = self.start_time {
+                if start.elapsed() > self.time_limit {
+                    return ExecutionResult::TimeLimitExceeded;
                 }
             }
-            pc += 1;
+        }
+
+        match &tokens[self.pc] {
+            Token::Integer(val, _) => {
+                if self.push_safe(*val).is_err() {
+                    return ExecutionResult::MemoryLimitExceeded;
+                }
+            }
+            Token::Command(cmd, _) => {
+                let result = match cmd {
+                    'p' | 'P' => {
+                        let mut wrapper = LimitWriter {
+                            inner: &mut self.output,
+                            written: self.bytes_written,
+                            limit: self.max_output_size,
+                        };
+                        let exec_res = Self::execute_command_with_writer(
+                            &mut self.stack,
+                            &mut self.input,
+                            *cmd,
+                            tokens,
+                            &mut self.pc,
+                            &mut wrapper,
+                        );
+                        self.bytes_written = wrapper.written;
+                        exec_res
+                    }
+                    _ => Self::execute_command_with_writer(
+                        &mut self.stack,
+                        &mut self.input,
+                        *cmd,
+                        tokens,
+                        &mut self.pc,
+                        &mut self.output,
+                    ),
+                };
+
+                match result {
+                    Ok(_) => {} // Continue
+                    Err(e) => return ExecutionResult::RuntimeError(e),
+                }
+
+                if self.stack.len() > self.max_stack_size {
+                    return ExecutionResult::MemoryLimitExceeded;
+                }
+                self.max_stack_depth = self.max_stack_depth.max(self.stack.len());
+            }
+        }
+
+        self.pc += 1;
+        if self.pc >= tokens.len() {
+            ExecutionResult::Ok
+        } else {
+            ExecutionResult::Running
         }
     }
 
-    fn execute_command(&mut self, cmd: char, tokens: &[Token], pc: &mut usize) {
+    pub fn eval(&mut self, tokens: &[Token]) -> EvalResult {
+        loop {
+            let res = self.step(tokens);
+            match res {
+                ExecutionResult::Running => continue,
+                _ => return (res, self.max_stack_depth),
+            }
+        }
+    }
+
+    fn execute_command_with_writer<R2: Read, W2: Write>(
+        stack: &mut Vec<i64>,
+        input: &mut R2,
+        cmd: char,
+        tokens: &[Token],
+        pc: &mut usize,
+        writer: &mut W2,
+    ) -> Result<(), RuntimeError> {
         match cmd {
             // Arithmetic
             '+' => {
-                let b = self.stack.pop().unwrap_or(0);
-                let a = self.stack.pop().unwrap_or(0);
-                self.stack.push(a + b);
+                let b = stack.pop().ok_or(RuntimeError::StackUnderflow)?;
+                let a = stack.pop().ok_or(RuntimeError::StackUnderflow)?;
+                stack.push(a + b);
             }
             '-' => {
-                let b = self.stack.pop().unwrap_or(0);
-                let a = self.stack.pop().unwrap_or(0);
-                self.stack.push(a - b);
+                let b = stack.pop().ok_or(RuntimeError::StackUnderflow)?;
+                let a = stack.pop().ok_or(RuntimeError::StackUnderflow)?;
+                stack.push(a - b);
             }
             '*' => {
-                let b = self.stack.pop().unwrap_or(0);
-                let a = self.stack.pop().unwrap_or(0);
-                self.stack.push(a * b);
+                let b = stack.pop().ok_or(RuntimeError::StackUnderflow)?;
+                let a = stack.pop().ok_or(RuntimeError::StackUnderflow)?;
+                stack.push(a * b);
             }
             '/' => {
-                let b = self.stack.pop().unwrap_or(0);
-                let a = self.stack.pop().unwrap_or(0);
+                let b = stack.pop().ok_or(RuntimeError::StackUnderflow)?;
+                let a = stack.pop().ok_or(RuntimeError::StackUnderflow)?;
                 if b != 0 {
-                    self.stack.push(a / b);
+                    stack.push(a / b);
                 } else {
-                    // Division by zero: pushing 0 or handling error? Spec didn't strictly specify panic behavior after revert.
-                    // Assuming safe behavior: push 0 or keep stack. Let's push 0 for now.
-                    self.stack.push(0);
+                    return Err(RuntimeError::DivisionByZero);
                 }
             }
             '%' => {
-                let b = self.stack.pop().unwrap_or(0);
-                let a = self.stack.pop().unwrap_or(0);
+                let b = stack.pop().ok_or(RuntimeError::StackUnderflow)?;
+                let a = stack.pop().ok_or(RuntimeError::StackUnderflow)?;
                 if b != 0 {
-                    self.stack.push(a % b);
+                    stack.push(a % b);
                 } else {
-                    self.stack.push(0);
+                    return Err(RuntimeError::DivisionByZero);
                 }
             }
 
             // Stack Ops
             ':' => {
                 // Dup
-                if let Some(&val) = self.stack.last() {
-                    self.stack.push(val);
-                }
+                let val = *stack.last().ok_or(RuntimeError::StackUnderflow)?;
+                stack.push(val);
             }
             ';' => {
                 // Pop
-                self.stack.pop();
+                stack.pop().ok_or(RuntimeError::StackUnderflow)?;
             }
             'x' => {
                 // Swap
-                if self.stack.len() >= 2 {
-                    let len = self.stack.len();
-                    self.stack.swap(len - 1, len - 2);
+                if stack.len() >= 2 {
+                    let len = stack.len();
+                    stack.swap(len - 1, len - 2);
+                } else {
+                    return Err(RuntimeError::StackUnderflow);
                 }
             }
             '@' => {
                 // Rot (a, b, c -> b, c, a)
-                if self.stack.len() >= 3 {
-                    let c = self.stack.pop().unwrap();
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    self.stack.push(b);
-                    self.stack.push(c);
-                    self.stack.push(a);
+                if stack.len() >= 3 {
+                    let c = stack.pop().unwrap();
+                    let b = stack.pop().unwrap();
+                    let a = stack.pop().unwrap();
+                    stack.push(b);
+                    stack.push(c);
+                    stack.push(a);
+                } else {
+                    return Err(RuntimeError::StackUnderflow);
                 }
             }
             'R' => {
                 // Reverse entire stack
-                self.stack.reverse();
+                stack.reverse();
             }
 
             // IO
             'r' => {
                 // Read Num
-                let val = self.read_number();
-                self.stack.push(val);
+                let val = Self::read_number_static(input)?;
+                stack.push(val);
             }
-            'T' => {
-                // Read Text - read entire line and push each char as code
-                let text = self.read_text();
-                for ch in text.chars() {
-                    self.stack.push(ch as i64);
-                }
+            't' => {
+                // Read Text - read one char
+                let val = Self::read_byte_static(input)?;
+                stack.push(val);
             }
             'p' => {
                 // Print Num
-                if let Some(val) = self.stack.pop() {
-                    print!("{}", val);
-                    io::stdout().flush().unwrap();
-                }
+                let val = stack.pop().ok_or(RuntimeError::StackUnderflow)?;
+                write!(writer, "{}", val).map_err(|e| {
+                    if e.kind() == std::io::ErrorKind::Other
+                        && e.to_string() == "Output limit exceeded"
+                    {
+                        RuntimeError::OutputLimitExceeded
+                    } else {
+                        RuntimeError::IoError(e.to_string())
+                    }
+                })?;
             }
             'P' => {
                 // Print Char
-                if let Some(val) = self.stack.pop() {
-                    let c = (val as u8) as char;
-                    print!("{}", c);
-                    io::stdout().flush().unwrap();
-                }
+                let val = stack.pop().ok_or(RuntimeError::StackUnderflow)?;
+                let c = (val as u8) as char;
+                write!(writer, "{}", c).map_err(|e| {
+                    if e.kind() == std::io::ErrorKind::Other
+                        && e.to_string() == "Output limit exceeded"
+                    {
+                        RuntimeError::OutputLimitExceeded
+                    } else {
+                        RuntimeError::IoError(e.to_string())
+                    }
+                })?;
             }
 
             // Control Flow
             '[' => {
                 // While Start
                 // Check if top is 0 (without popping)
-                let val = self.stack.last().copied().unwrap_or(0);
+                let val = *stack.last().ok_or(RuntimeError::StackUnderflow)?;
                 if val == 0 {
                     // Jump to matching ]
-                    if let Some(target) = self.find_matching(tokens, *pc, '[', ']', 1) {
-                        *pc = target;
-                    }
+                    let target = Self::find_matching_static(tokens, *pc, '[', ']', 1)
+                        .ok_or(RuntimeError::UnmatchedBracket)?;
+                    *pc = target;
                 }
             }
             ']' => {
                 // While End
                 // Jump back to matching [
-                if let Some(target) = self.find_matching(tokens, *pc, ']', '[', -1) {
-                    *pc = target - 1; // -1 because loop will increment pc
-                }
+                let target = Self::find_matching_static(tokens, *pc, ']', '[', -1)
+                    .ok_or(RuntimeError::UnmatchedBracket)?;
+                *pc = target - 1; // -1 because loop will increment pc
             }
             '(' => {
                 // If Start
-                // Check if top is 0 (without popping yet?) Spec says "Pop after execution".
-                // Logic: If 0, jump to matching ). Else, continue.
-                let val = self.stack.last().copied().unwrap_or(0);
+                // Pop the condition value immediately
+                let val = stack.pop().ok_or(RuntimeError::StackUnderflow)?;
                 if val == 0 {
-                    if let Some(target) = self.find_matching(tokens, *pc, '(', ')', 1) {
-                        *pc = target - 1;
-                        // And pop the 0 (per spec "Pop after execution", meaning pop happens at end of block or skipped block?)
-                        // If we skip, we land at ')'. ')' will handle the pop?
-                    }
+                    // Jump to matching )
+                    let target = Self::find_matching_static(tokens, *pc, '(', ')', 1)
+                        .ok_or(RuntimeError::UnmatchedBracket)?;
+                    *pc = target;
                 }
             }
             ')' => {
                 // If End
-                // Always pop the condition value
-                self.stack.pop();
+                // Do nothing (condition already popped at start)
             }
 
-            _ => {}
+            _ => return Err(RuntimeError::UnknownCommand(cmd)),
         }
+        Ok(())
     }
 
-    fn read_number(&self) -> i64 {
-        // Simple synchronous read from stdin.
-        // In a real golf runner, we might need buffering.
-        // For now, read a word.
+    fn read_number_static<R2: Read>(input: &mut R2) -> Result<i64, RuntimeError> {
         let mut word = String::new();
         let mut buffer = [0; 1];
         let mut started = false;
 
-        // Skip whitespace then read digits
         loop {
-            match io::stdin().read_exact(&mut buffer) {
+            match input.read_exact(&mut buffer) {
                 Ok(_) => {
                     let c = buffer[0] as char;
                     if c.is_ascii_whitespace() {
                         if started {
                             break;
-                        } // End of word
+                        }
                     } else {
                         started = true;
                         word.push(c);
                     }
                 }
-                Err(_) => break, // EOF or error
+                Err(_) => break,
             }
         }
-        word.parse().unwrap_or(0)
+        if word.is_empty() {
+            return Ok(0);
+        }
+        word.parse().map_err(|_| RuntimeError::InvalidInput)
     }
 
-    fn read_text(&self) -> String {
-        // Read entire line from stdin
-        let mut line = String::new();
-        io::stdin().read_line(&mut line).unwrap_or(0);
-        // Remove trailing newline
-        line.trim_end().to_string()
+    fn read_byte_static<R2: Read>(input: &mut R2) -> Result<i64, RuntimeError> {
+        let mut buf = [0; 1];
+        match input.read(&mut buf) {
+            Ok(1) => Ok(buf[0] as i64),
+            Ok(0) => Ok(0),
+            Err(e) => Err(RuntimeError::IoError(e.to_string())),
+            _ => Ok(0),
+        }
     }
 
-    fn find_matching(
-        &self,
+    fn find_matching_static(
         tokens: &[Token],
         start: usize,
         open: char,
         close: char,
         dir: i32,
     ) -> Option<usize> {
-        let mut depth = 1; // Already sitting on one bracket
+        let mut depth = 1;
         let mut i = start as i32 + dir;
         let len = tokens.len() as i32;
 
         while i >= 0 && i < len {
             match &tokens[i as usize] {
-                Token::Command(c) if *c == open => depth += 1,
-                Token::Command(c) if *c == close => {
+                Token::Command(c, _) if *c == open => depth += 1,
+                Token::Command(c, _) if *c == close => {
                     depth -= 1;
                     if depth == 0 {
                         return Some(i as usize);
@@ -233,5 +453,30 @@ impl Interpreter {
             i += dir;
         }
         None
+    }
+}
+
+// 出力制限を監視するためのラッパー
+struct LimitWriter<'a, W: Write> {
+    inner: &'a mut W,
+    written: usize,
+    limit: usize,
+}
+
+impl<'a, W: Write> Write for LimitWriter<'a, W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.written + buf.len() > self.limit {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Output limit exceeded",
+            ));
+        }
+        let n = self.inner.write(buf)?;
+        self.written += n;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
     }
 }

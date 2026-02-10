@@ -1,6 +1,20 @@
 [package]
 name = "flap"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 
 [dependencies]
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+colored = "2.0"
+winreg = "0.52"
+anyhow = "1.0"
+self_update = "0.41"
+
+[[bin]]
+name = "flap"
+path = "src/main.rs"
+
+[[bin]]
+name = "flap-init"
+path = "src/bin/flap-init.rs"

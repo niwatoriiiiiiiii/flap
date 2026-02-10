@@ -1,0 +1,5 @@
+# Flap Configuration
+time_limit = 2000
+stack_size = 131072
+output_size = 1048576
+time_check_interval = 1000
