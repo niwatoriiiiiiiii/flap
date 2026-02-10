@@ -260,6 +260,7 @@ fn run_repl(config: &Config) {
 }
 
 fn print_error(e: &RuntimeError, code: &str, filename: &str, tokens: &[Token], pc: usize) {
+    println!();
     if pc >= tokens.len() {
         println!("{} {}", "error:".red().bold(), e);
         return;
