@@ -7,7 +7,17 @@ use std::process::Command;
 use winreg::RegKey;
 use winreg::enums::*;
 
-fn main() -> Result<()> {
+fn main() {
+    if let Err(e) = real_main() {
+        println!("{} {:?}", "Error:".red().bold(), e);
+    }
+
+    println!();
+    println!("Press Enter to exit...");
+    let _ = std::io::stdin().read_line(&mut String::new());
+}
+
+fn real_main() -> Result<()> {
     println!("{}", "Starting Flap installation...".green().bold());
 
     // 1. Build
@@ -31,14 +41,25 @@ fn main() -> Result<()> {
     }
 
     // 3. Copy binary
-    let target_dir = Path::new("target").join("release");
-    let src_bin = target_dir.join("flap.exe");
-    let dst_bin = bin_dir.join("flap.exe");
+    // Assume flap.exe is in the same directory as flap-init.exe (if run from release dir)
+    // Or in target/release/flap.exe (if run via cargo run)
 
-    if !src_bin.exists() {
-        anyhow::bail!("Built binary not found at {:?}", src_bin);
-    }
+    let current_exe = env::current_exe().context("Failed to get current exe path")?;
+    let parent_dir = current_exe.parent().context("Failed to get parent dir")?;
 
+    let possible_paths = [
+        parent_dir.join("flap.exe"),                          // sibling
+        Path::new("target").join("release").join("flap.exe"), // from root
+    ];
+
+    let src_bin = possible_paths
+        .iter()
+        .find(|p| p.exists())
+        .ok_or_else(|| anyhow::anyhow!("Built binary flap.exe not found"))?;
+
+    let dst_bin = bin_dir.join("flap.exe"); // RE-ADDED
+
+    println!("Found binary at: {:?}", src_bin);
     println!("Copying {} to {}...", src_bin.display(), dst_bin.display());
     fs::copy(&src_bin, &dst_bin).context("Failed to copy binary")?;
 

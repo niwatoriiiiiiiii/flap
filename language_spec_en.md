@@ -32,13 +32,13 @@ Strings are represented on the stack as a sequence of integers (ASCII codes).
 
 Pops the top two values and pushes the result.
 
-| Command | Name | Description                             | Stack Change (a, b -> Result) |
-| :-----: | :--- | :-------------------------------------- | :---------------------------- |
-|   `+`   | Add  | Addition                                | `a, b -> a + b`               |
-|   `-`   | Sub  | Subtraction                             | `a, b -> a - b`               |
-|   `*`   | Mul  | Multiplication                          | `a, b -> a * b`               |
-|   `/`   | Div  | Division (Pushes 0 on division by zero) | `a, b -> a / b`               |
-|   `%`   | Mod  | Modulo (Pushes 0 on division by zero)   | `a, b -> a % b`               |
+| Command | Name | Description                           | Stack Change (a, b -> Result) |
+| :-----: | :--- | :------------------------------------ | :---------------------------- |
+|   `+`   | Add  | Addition                              | `a, b -> a + b`               |
+|   `-`   | Sub  | Subtraction                           | `a, b -> a - b`               |
+|   `*`   | Mul  | Multiplication                        | `a, b -> a * b`               |
+|   `/`   | Div  | Division (Errors on division by zero) | `a, b -> a / b`               |
+|   `%`   | Mod  | Modulo (Errors on division by zero)   | `a, b -> a % b`               |
 
 ### 3.2 Stack Operations
 
@@ -54,13 +54,12 @@ Directly manipulates the state of the stack.
 
 ### 3.3 Input/Output
 
-| Command | Name          | Description                                                                                                                      | Stack Change        |
-| :-----: | :------------ | :------------------------------------------------------------------------------------------------------------------------------- | :------------------ |
-|   `r`   | Read Num      | Reads a whitespace-separated number from stdin and pushes it to the stack. Errors if input is not a number. **Pushes 0 on EOF.** | `-> n`              |
-|   `t`   | Readable Char | Reads one local character from stdin and pushes its ASCII code to the stack. **Pushes 0 on EOF.**                                | `-> c`              |
-|   `T`   | Text          | Read one line from standard input and push characters as codes. **The last character ends up at the top.**                       | `-> c1, c2, ... cn` |
-|   `p`   | Print         | Pop an integer and print it to standard output                                                                                   | `n -> (none)`       |
-|   `P`   | PChar         | Pop a character code and print it as a character                                                                                 | `n -> (none)`       |
+| Command | Name          | Description                                                                                                                      | Stack Change  |
+| :-----: | :------------ | :------------------------------------------------------------------------------------------------------------------------------- | :------------ |
+|   `r`   | Read Num      | Reads a whitespace-separated number from stdin and pushes it to the stack. Errors if input is not a number. **Pushes 0 on EOF.** | `-> n`        |
+|   `t`   | Readable Char | Reads one local character from stdin and pushes its ASCII code to the stack. **Pushes 0 on EOF.**                                | `-> c`        |
+|   `p`   | Print         | Pop an integer and print it to standard output                                                                                   | `n -> (none)` |
+|   `P`   | PChar         | Pop a character code and print it as a character                                                                                 | `n -> (none)` |
 
 ---
 
@@ -71,8 +70,8 @@ Controls execution flow based on the state of the stack.
 ### 4.1 Iteration (`[` ... `]`)
 
 - **While Loop**
-- When `[` is reached: If the stack top is **non-zero**, execute the block.
-- When `]` is reached: If the stack top is **non-zero**, jump back to just after the corresponding `[`.
+- When `[` is reached: If the stack top is **non-zero**, execute the block. If **zero**, jump to just after the matching `]`.
+- When `]` is reached: **Unconditionally jumps back** to the matching `[`.
 - **Note**: The top value is **not popped** at the start or end of the loop.
 
 ### 4.2 Conditional Branching (`(` ... `)`)

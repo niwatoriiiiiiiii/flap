@@ -22,7 +22,7 @@ fn main() {
 
     match args[1].as_str() {
         "--version" => {
-            println!("flap {}", VERSION);
+            println!("flap v{}", VERSION);
         }
         "--help" => {
             print_help();
