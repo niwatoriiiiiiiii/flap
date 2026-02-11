@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use colored::*;
 use std::env;
 use std::fs;
+#[cfg(unix)]
 use std::io::Write;
 use std::path::Path;
 
@@ -95,7 +96,6 @@ fn download_from_github(bin_dir: &Path) -> Result<()> {
         .first()
         .ok_or_else(|| anyhow::anyhow!("No releases found on GitHub"))?;
     println!("Latest version: {}", latest.version);
-
     let target = if cfg!(target_os = "windows") {
         "x86_64-pc-windows-msvc"
     } else if cfg!(target_os = "macos") {
@@ -121,14 +121,10 @@ fn download_from_github(bin_dir: &Path) -> Result<()> {
     let tmp_file_path = bin_dir.join(&asset.name);
     println!("Downloading {}...", asset.name);
 
-    // Download to file
+    // Download to file using self_update's standard method
     let mut tmp_file = fs::File::create(&tmp_file_path).context("Failed to create temp file")?;
     self_update::Download::from_url(&asset.download_url)
         .show_progress(true)
-        .set_header(
-            reqwest::header::ACCEPT,
-            "application/octet-stream".parse().unwrap(),
-        )
         .download_to(&mut tmp_file)
         .context("Failed to download asset")?;
 
@@ -148,39 +144,19 @@ fn download_from_github(bin_dir: &Path) -> Result<()> {
     }
     fs::create_dir_all(&tmp_dir).context("Failed to create temp extraction directory")?;
 
-    if asset.name.ends_with(".zip") {
-        self_update::Extract::from_source(&tmp_file_path)
-            .archive(self_update::ArchiveKind::Zip)
-            .extract_into(&tmp_dir)
-            .context("Failed to extract ZIP natively")?;
-    } else {
-        self_update::Extract::from_source(&tmp_file_path)
-            .archive(self_update::ArchiveKind::Tar(Some(
-                self_update::Compression::Gz,
-            )))
-            .extract_into(&tmp_dir)
-            .context("Failed to extract tar.gz natively")?;
+    if let Err(e) = extract_archive(&tmp_file_path, &tmp_dir) {
+        println!(
+            "{} Native extraction failed ({:?}). Trying fallback...",
+            "Warning:".yellow(),
+            e
+        );
+        fallback_extract(&tmp_file_path, &tmp_dir)?;
     }
 
     // Find binary in extracted files and move it
-    let mut found = false;
-    for entry in fs::read_dir(&tmp_dir).context("Failed to read extraction directory")? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file() {
-            let name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or_default();
-            if name == BIN_NAME {
-                fs::rename(&path, bin_dir.join(BIN_NAME)).context("Failed to move binary")?;
-                found = true;
-                break;
-            }
-        }
-    }
-
-    if !found {
+    if let Some(src_path) = find_binary(&tmp_dir, BIN_NAME) {
+        fs::rename(&src_path, bin_dir.join(BIN_NAME)).context("Failed to move binary")?;
+    } else {
         anyhow::bail!("Binary '{}' not found in the downloaded archive.", BIN_NAME);
     }
 
@@ -189,6 +165,87 @@ fn download_from_github(bin_dir: &Path) -> Result<()> {
     fs::remove_file(&tmp_file_path).ok();
 
     Ok(())
+}
+
+fn extract_archive(archive_path: &Path, dst: &Path) -> Result<()> {
+    if archive_path.extension().map_or(false, |ext| ext == "zip") {
+        self_update::Extract::from_source(archive_path)
+            .archive(self_update::ArchiveKind::Zip)
+            .extract_into(dst)
+            .context("Native ZIP extraction failed")?;
+    } else {
+        self_update::Extract::from_source(archive_path)
+            .archive(self_update::ArchiveKind::Tar(Some(
+                self_update::Compression::Gz,
+            )))
+            .extract_into(dst)
+            .context("Native tar.gz extraction failed")?;
+    }
+    Ok(())
+}
+
+fn fallback_extract(archive_path: &Path, dst: &Path) -> Result<()> {
+    #[cfg(windows)]
+    {
+        let status = std::process::Command::new("powershell")
+            .args(&[
+                "-Command",
+                &format!(
+                    "Expand-Archive -Path '{}' -DestinationPath '{}' -Force",
+                    archive_path.display(),
+                    dst.display()
+                ),
+            ])
+            .status()
+            .context("Failed to run PowerShell fallback extraction")?;
+
+        if status.success() {
+            return Ok(());
+        }
+    }
+
+    // Try standard tar (available on modern Windows and Unix)
+    let mut cmd = std::process::Command::new("tar");
+    if archive_path.extension().map_or(false, |ext| ext == "zip") {
+        cmd.args(&["-xf", archive_path.to_str().unwrap()]);
+    } else {
+        cmd.args(&["-xzf", archive_path.to_str().unwrap()]);
+    }
+    cmd.args(&["-C", dst.to_str().unwrap()]);
+
+    let status = cmd
+        .status()
+        .context("Failed to run tar fallback extraction")?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("Both native and fallback extraction failed.")
+    }
+}
+
+fn find_binary(dir: &Path, bin_name: &str) -> Option<std::path::PathBuf> {
+    // 1. Direct check
+    let direct = dir.join(bin_name);
+    if direct.is_file() {
+        return Some(direct);
+    }
+
+    // 2. Recursive search
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(found) = find_binary(&path, bin_name) {
+                    return Some(found);
+                }
+            } else if path.is_file() {
+                if path.file_name().and_then(|n| n.to_str()) == Some(bin_name) {
+                    return Some(path);
+                }
+            }
+        }
+    }
+    None
 }
 
 #[cfg(windows)]
