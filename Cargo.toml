@@ -7,14 +7,16 @@ edition = "2024"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 colored = "2.0"
-winreg = "0.52"
 anyhow = "1.0"
 self_update = "0.41"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
 
 [[bin]]
 name = "flap"
 path = "src/main.rs"
 
 [[bin]]
-name = "flap-init"
-path = "src/bin/flap-init.rs"
+name = "flap_installer"
+path = "src/bin/flap_installer.rs"
