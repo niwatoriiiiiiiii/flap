@@ -73,6 +73,6 @@ jobs:
         with:
           files: |
             flap-${{ matrix.target }}.${{ matrix.pkg_ext }}
-            ${{ matrix.installer_name }}_${{ matrix.target }}
+            flap_installer_${{ matrix.target }}*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
