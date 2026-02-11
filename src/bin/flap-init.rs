@@ -20,18 +20,7 @@ fn main() {
 fn real_main() -> Result<()> {
     println!("{}", "Starting Flap installation...".green().bold());
 
-    // 1. Build
-    println!("Building flap...");
-    let status = Command::new("cargo")
-        .args(&["build", "--release", "--bin", "flap"])
-        .status()
-        .context("Failed to run cargo build")?;
-
-    if !status.success() {
-        anyhow::bail!("Build failed");
-    }
-
-    // 2. Create install dir
+    // 1. Create install dir
     let home = env::var("USERPROFILE").context("USERPROFILE not set")?;
     let flap_dir = Path::new(&home).join(".flap");
     let bin_dir = flap_dir.join("bin");
@@ -40,28 +29,26 @@ fn real_main() -> Result<()> {
         fs::create_dir_all(&bin_dir).context("Failed to create installation directory")?;
     }
 
-    // 3. Copy binary
-    // Assume flap.exe is in the same directory as flap-init.exe (if run from release dir)
-    // Or in target/release/flap.exe (if run via cargo run)
+    let dst_bin = bin_dir.join("flap.exe");
 
+    // 2. Check for local binary (development or bundled)
     let current_exe = env::current_exe().context("Failed to get current exe path")?;
     let parent_dir = current_exe.parent().context("Failed to get parent dir")?;
+    let local_bin = parent_dir.join("flap.exe");
 
-    let possible_paths = [
-        parent_dir.join("flap.exe"),                          // sibling
-        Path::new("target").join("release").join("flap.exe"), // from root
-    ];
-
-    let src_bin = possible_paths
-        .iter()
-        .find(|p| p.exists())
-        .ok_or_else(|| anyhow::anyhow!("Built binary flap.exe not found"))?;
-
-    let dst_bin = bin_dir.join("flap.exe"); // RE-ADDED
-
-    println!("Found binary at: {:?}", src_bin);
-    println!("Copying {} to {}...", src_bin.display(), dst_bin.display());
-    fs::copy(&src_bin, &dst_bin).context("Failed to copy binary")?;
+    if local_bin.exists() {
+        println!("Found local binary at: {:?}", local_bin);
+        println!(
+            "Copying {} to {}...",
+            local_bin.display(),
+            dst_bin.display()
+        );
+        fs::copy(&local_bin, &dst_bin).context("Failed to copy local binary")?;
+    } else {
+        // 3. Download from GitHub
+        println!("No local binary found. Downloading from GitHub...");
+        download_from_github(&bin_dir)?;
+    }
 
     // 4. Update PATH
     println!("Updating PATH...");
@@ -70,6 +57,77 @@ fn real_main() -> Result<()> {
     println!("{}", "Installation complete!".green().bold());
     println!("Please restart your terminal to use 'flap' command.");
     println!("Try running: {}", "flap --version".cyan());
+
+    Ok(())
+}
+
+fn download_from_github(bin_dir: &Path) -> Result<()> {
+    println!("Fetching latest release information...");
+    let releases = self_update::backends::github::ReleaseList::configure()
+        .repo_owner("niwatoriiiiiiiii")
+        .repo_name("flap")
+        .build()?
+        .fetch()?;
+
+    let latest = releases
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("No releases found on GitHub"))?;
+    println!("Latest version: {}", latest.version);
+
+    let asset = latest
+        .asset_for("x86_64-pc-windows-msvc", None)
+        .ok_or_else(|| anyhow::anyhow!("No asset found for x86_64-pc-windows-msvc ZIP"))?;
+
+    let tmp_zip = bin_dir.join("flap_download.zip");
+    println!("Downloading {}...", asset.name);
+
+    // Download to file
+    let mut tmp_file = fs::File::create(&tmp_zip).context("Failed to create temp zip file")?;
+    self_update::Download::from_url(&asset.download_url)
+        .show_progress(true)
+        .download_to(&mut tmp_file)
+        .context("Failed to download asset")?;
+
+    // Drop file handle before extraction
+    drop(tmp_file);
+
+    println!("Extracting...");
+    // Try tar (available in Win10 1803+)
+    let status = Command::new("tar")
+        .args(&[
+            "-xf",
+            tmp_zip.to_str().unwrap(),
+            "-C",
+            bin_dir.to_str().unwrap(),
+        ])
+        .status();
+
+    let success = match status {
+        Ok(s) => s.success(),
+        Err(_) => false,
+    };
+
+    if !success {
+        println!("tar failed or not found, trying PowerShell...");
+        let status = Command::new("powershell")
+            .args(&[
+                "-Command",
+                &format!(
+                    "Expand-Archive -Path '{}' -DestinationPath '{}' -Force",
+                    tmp_zip.display(),
+                    bin_dir.display()
+                ),
+            ])
+            .status()
+            .context("Failed to run PowerShell for extraction")?;
+
+        if !status.success() {
+            anyhow::bail!("Failed to extract archive via PowerShell");
+        }
+    }
+
+    println!("Cleaning up...");
+    fs::remove_file(&tmp_zip).ok();
 
     Ok(())
 }
