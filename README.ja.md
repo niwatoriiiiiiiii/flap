@@ -13,24 +13,35 @@ Flapは、Rustで実装されたミニマルかつ強力なスタックベース
 
 ## インストール
 
-[Rust](https://www.rust-lang.org/) がインストールされていることを確認し、以下を実行してください：
+[Releases](https://github.com/niwatoriiiiiiiii/flap/releases) からお使いのプラットフォームに合わせた `flap_installer` をダウンロードして実行してください。
+
+または、[Rust](https://www.rust-lang.org/) がインストールされている場合は以下でビルド・インストールできます：
 
 ```bash
 git clone https://github.com/niwatoriiiiiiiii/flap.git
 cd flap
-cargo build --release
+cargo install --path .
 ```
 
 ## 使い方
 
-`.flap` ファイルを実行するか、コードを文字列として直接渡します：
+Flapは便利なCLIコマンドを提供しています：
 
 ```bash
-# ファイルを実行
-cargo run -- examples/hello_flap.flap
+# 新しいプロジェクトを初期化 (src/main.flap と flap.toml を作成)
+flap init
 
-# コードを直接実行
-cargo run -- "10,20+p"
+# カレントディレクトリの src/main.flap を実行
+flap run
+
+# 対話モード (REPL) を起動
+flap repl
+
+# flap を最新バージョンにアップデート
+flap update
+
+# 指定したファイルを実行
+flap <file>
 ```
 
 ## 言語仕様
@@ -39,12 +50,3 @@ cargo run -- "10,20+p"
 
 - [日本語仕様書](./language_spec_jp.md)
 - [英語仕様書](./language_spec_en.md)
-
-## サンプルプログラム
-
-[examples/](./examples) ディレクトリにいくつかのサンプルがあります：
-
-- `hello_flap.flap`: 定番の "Hello, World!"
-- `add.flap`: 足し算のデモ
-- `parity.flap`: `if` コマンドを使った偶数・奇数判定
-- `echo.flap`: 入力の表示
