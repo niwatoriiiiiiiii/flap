@@ -61,7 +61,11 @@ jobs:
             tar -czf ../flap-${{ matrix.target }}.tar.gz ${{ matrix.artifact_name }}
           fi
           # Rename installer for upload
-          mv ${{ matrix.installer_name }} ../${{ matrix.installer_name }}_${{ matrix.target }}
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            mv ${{ matrix.installer_name }} ../flap_installer_${{ matrix.target }}.exe
+          else
+            mv ${{ matrix.installer_name }} ../flap_installer_${{ matrix.target }}
+          fi
 
       - name: Upload Artifacts
         uses: softprops/action-gh-release@v2
