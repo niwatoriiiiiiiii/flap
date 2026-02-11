@@ -127,7 +127,7 @@ fn download_from_github(bin_dir: &Path) -> Result<()> {
                 ext
             )
         })?;
-        (archive.name, archive.download_url, true)
+        (archive.name.clone(), archive.download_url.clone(), true)
     };
 
     let tmp_file_path = bin_dir.join(&asset_name);
@@ -138,6 +138,10 @@ fn download_from_github(bin_dir: &Path) -> Result<()> {
     let mut tmp_file = fs::File::create(&tmp_file_path).context("Failed to create temp file")?;
     self_update::Download::from_url(&download_url)
         .show_progress(true)
+        .set_header(
+            reqwest::header::ACCEPT,
+            "application/octet-stream".parse().unwrap(),
+        )
         .download_to(&mut tmp_file)
         .context("Failed to download asset")?;
 
