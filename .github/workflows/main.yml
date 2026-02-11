@@ -52,7 +52,11 @@ jobs:
 
           cd assets
           if [ "${{ matrix.pkg_ext }}" == "zip" ]; then
-            zip -r ../flap-${{ matrix.target }}.zip ${{ matrix.artifact_name }}
+            if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+              7z a ../flap-${{ matrix.target }}.zip ${{ matrix.artifact_name }}
+            else
+              zip -r ../flap-${{ matrix.target }}.zip ${{ matrix.artifact_name }}
+            fi
           else
             tar -czf ../flap-${{ matrix.target }}.tar.gz ${{ matrix.artifact_name }}
           fi
