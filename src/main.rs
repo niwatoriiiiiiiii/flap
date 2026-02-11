@@ -296,18 +296,18 @@ fn print_error(e: &RuntimeError, code: &str, filename: &str, tokens: &[Token], p
     let diag = create_diagnostic(&e.to_string(), code, span);
 
     println!("{} {}", "error:".red().bold(), diag.message.bold());
-    println!("  {} {}:{}:{}", "-->".blue(), filename, diag.line, diag.col);
+    println!("  {} {}:{}:{}", "-->".cyan(), filename, diag.line, diag.col);
 
     let line_num = diag.line.to_string();
     let pad = " ".repeat(line_num.len());
 
-    println!(" {} {}", pad, "|".blue());
-    println!(" {} {} {}", line_num.blue(), "|".blue(), diag.line_content);
+    println!(" {} {}", pad, "|".cyan());
+    println!(" {} {} {}", line_num.cyan(), "|".cyan(), diag.line_content);
 
     let pointer_line = format!(
         "{}{}",
         " ".repeat(diag.pointer_padding),
         "^".repeat(diag.pointer_len)
     );
-    println!(" {} {} {}", pad, "|".blue(), pointer_line.red().bold());
+    println!(" {} {} {}", pad, "|".cyan(), pointer_line.red().bold());
 }
