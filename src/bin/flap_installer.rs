@@ -104,65 +104,89 @@ fn download_from_github(bin_dir: &Path) -> Result<()> {
         "x86_64-unknown-linux-gnu"
     };
 
-    let ext = if cfg!(target_os = "windows") {
-        ".zip"
+    // Try to find a direct binary asset first (e.g. flap-target.exe)
+    let binary_asset = latest.assets.iter().find(|a| {
+        a.name.contains(target)
+            && (a.name.ends_with(".exe") || !a.name.contains('.'))
+            && !a.name.contains("installer")
+    });
+
+    let (asset_name, download_url, is_archive) = if let Some(ba) = binary_asset {
+        println!("Found direct binary asset: {}", ba.name);
+        (ba.name.clone(), ba.download_url.clone(), false)
     } else {
-        ".tar.gz"
+        let ext = if cfg!(target_os = "windows") {
+            ".zip"
+        } else {
+            ".tar.gz"
+        };
+        let archive = latest.asset_for(target, Some(ext)).ok_or_else(|| {
+            anyhow::anyhow!(
+                "No asset found for target {} with extension {}",
+                target,
+                ext
+            )
+        })?;
+        (archive.name, archive.download_url, true)
     };
 
-    let asset = latest.asset_for(target, Some(ext)).ok_or_else(|| {
-        anyhow::anyhow!(
-            "No asset found for target {} with extension {}",
-            target,
-            ext
-        )
-    })?;
+    let tmp_file_path = bin_dir.join(&asset_name);
+    println!("Downloading from: {}", download_url);
+    println!("Downloading {}...", asset_name);
 
-    let tmp_file_path = bin_dir.join(&asset.name);
-    println!("Downloading {}...", asset.name);
-
-    // Download to file using self_update's standard method
+    // Download to file
     let mut tmp_file = fs::File::create(&tmp_file_path).context("Failed to create temp file")?;
-    self_update::Download::from_url(&asset.download_url)
+    self_update::Download::from_url(&download_url)
         .show_progress(true)
         .download_to(&mut tmp_file)
         .context("Failed to download asset")?;
 
-    // Drop file handle before extraction
     drop(tmp_file);
 
     // Verify file size
     let metadata = fs::metadata(&tmp_file_path).context("Failed to get asset metadata")?;
-    if metadata.len() == 0 {
-        anyhow::bail!("Downloaded asset is empty. Release might be corrupted.");
-    }
+    let size_kb = metadata.len() / 1024;
+    println!("Downloaded file size: {} KiB", size_kb);
 
-    println!("Extracting archive...");
-    let tmp_dir = bin_dir.join("tmp_extract");
-    if tmp_dir.exists() {
-        fs::remove_dir_all(&tmp_dir).ok();
-    }
-    fs::create_dir_all(&tmp_dir).context("Failed to create temp extraction directory")?;
-
-    if let Err(e) = extract_archive(&tmp_file_path, &tmp_dir) {
-        println!(
-            "{} Native extraction failed ({:?}). Trying fallback...",
-            "Warning:".yellow(),
-            e
+    if metadata.len() < 10 * 1024 {
+        anyhow::bail!(
+            "Downloaded file is too small ({} KiB). This usually means the release asset is corrupted or the download URL pointed to an error page.\nURL: {}",
+            size_kb,
+            download_url
         );
-        fallback_extract(&tmp_file_path, &tmp_dir)?;
     }
 
-    // Find binary in extracted files and move it
-    if let Some(src_path) = find_binary(&tmp_dir, BIN_NAME) {
-        fs::rename(&src_path, bin_dir.join(BIN_NAME)).context("Failed to move binary")?;
+    if is_archive {
+        println!("Extracting archive...");
+        let tmp_dir = bin_dir.join("tmp_extract");
+        if tmp_dir.exists() {
+            fs::remove_dir_all(&tmp_dir).ok();
+        }
+        fs::create_dir_all(&tmp_dir).context("Failed to create temp extraction directory")?;
+
+        if let Err(e) = extract_archive(&tmp_file_path, &tmp_dir) {
+            println!(
+                "{} Native extraction failed ({:?}). Trying fallback...",
+                "Warning:".yellow(),
+                e
+            );
+            fallback_extract(&tmp_file_path, &tmp_dir)?;
+        }
+
+        // Find binary in extracted files and move it
+        if let Some(src_path) = find_binary(&tmp_dir, BIN_NAME) {
+            fs::rename(&src_path, bin_dir.join(BIN_NAME)).context("Failed to move binary")?;
+        } else {
+            anyhow::bail!("Binary '{}' not found in the downloaded archive.", BIN_NAME);
+        }
+
+        println!("Cleaning up...");
+        fs::remove_dir_all(&tmp_dir).ok();
+        fs::remove_file(&tmp_file_path).ok();
     } else {
-        anyhow::bail!("Binary '{}' not found in the downloaded archive.", BIN_NAME);
+        // Direct move
+        fs::rename(&tmp_file_path, bin_dir.join(BIN_NAME)).context("Failed to install binary")?;
     }
-
-    println!("Cleaning up...");
-    fs::remove_dir_all(&tmp_dir).ok();
-    fs::remove_file(&tmp_file_path).ok();
 
     Ok(())
 }
