@@ -53,7 +53,7 @@ jobs:
           cd assets
           if [ "${{ matrix.pkg_ext }}" == "zip" ]; then
             if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-              7z a ../flap-${{ matrix.target }}.zip ${{ matrix.artifact_name }}
+              powershell -Command "Compress-Archive -Path '${{ matrix.artifact_name }}' -DestinationPath '../flap-${{ matrix.target }}.zip' -Force"
             else
               zip -r ../flap-${{ matrix.target }}.zip ${{ matrix.artifact_name }}
             fi

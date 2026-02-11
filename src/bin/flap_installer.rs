@@ -3,8 +3,7 @@ use colored::*;
 use std::env;
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
 
 #[cfg(windows)]
 use winreg::RegKey;
@@ -105,9 +104,19 @@ fn download_from_github(bin_dir: &Path) -> Result<()> {
         "x86_64-unknown-linux-gnu"
     };
 
-    let asset = latest
-        .asset_for(target, None)
-        .ok_or_else(|| anyhow::anyhow!("No asset found for target {}", target))?;
+    let ext = if cfg!(target_os = "windows") {
+        ".zip"
+    } else {
+        ".tar.gz"
+    };
+
+    let asset = latest.asset_for(target, Some(ext)).ok_or_else(|| {
+        anyhow::anyhow!(
+            "No asset found for target {} with extension {}",
+            target,
+            ext
+        )
+    })?;
 
     let tmp_file_path = bin_dir.join(&asset.name);
     println!("Downloading {}...", asset.name);
@@ -116,94 +125,69 @@ fn download_from_github(bin_dir: &Path) -> Result<()> {
     let mut tmp_file = fs::File::create(&tmp_file_path).context("Failed to create temp file")?;
     self_update::Download::from_url(&asset.download_url)
         .show_progress(true)
+        .set_header(
+            reqwest::header::ACCEPT,
+            "application/octet-stream".parse().unwrap(),
+        )
         .download_to(&mut tmp_file)
         .context("Failed to download asset")?;
 
     // Drop file handle before extraction
     drop(tmp_file);
 
+    // Verify file size
+    let metadata = fs::metadata(&tmp_file_path).context("Failed to get asset metadata")?;
+    if metadata.len() == 0 {
+        anyhow::bail!("Downloaded asset is empty. Release might be corrupted.");
+    }
+
+    println!("Extracting archive...");
+    let tmp_dir = bin_dir.join("tmp_extract");
+    if tmp_dir.exists() {
+        fs::remove_dir_all(&tmp_dir).ok();
+    }
+    fs::create_dir_all(&tmp_dir).context("Failed to create temp extraction directory")?;
+
     if asset.name.ends_with(".zip") {
-        extract_zip(&tmp_file_path, bin_dir)?;
-    } else if asset.name.ends_with(".tar.gz") {
-        extract_tar_gz(&tmp_file_path, bin_dir)?;
+        self_update::Extract::from_source(&tmp_file_path)
+            .archive(self_update::ArchiveKind::Zip)
+            .extract_into(&tmp_dir)
+            .context("Failed to extract ZIP natively")?;
     } else {
-        // Assume direct binary
-        fs::rename(&tmp_file_path, bin_dir.join(BIN_NAME)).context("Failed to rename binary")?;
+        self_update::Extract::from_source(&tmp_file_path)
+            .archive(self_update::ArchiveKind::Tar(Some(
+                self_update::Compression::Gz,
+            )))
+            .extract_into(&tmp_dir)
+            .context("Failed to extract tar.gz natively")?;
+    }
+
+    // Find binary in extracted files and move it
+    let mut found = false;
+    for entry in fs::read_dir(&tmp_dir).context("Failed to read extraction directory")? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() {
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
+            if name == BIN_NAME {
+                fs::rename(&path, bin_dir.join(BIN_NAME)).context("Failed to move binary")?;
+                found = true;
+                break;
+            }
+        }
+    }
+
+    if !found {
+        anyhow::bail!("Binary '{}' not found in the downloaded archive.", BIN_NAME);
     }
 
     println!("Cleaning up...");
+    fs::remove_dir_all(&tmp_dir).ok();
     fs::remove_file(&tmp_file_path).ok();
 
-    Ok(())
-}
-
-fn extract_zip(zip_path: &Path, bin_dir: &Path) -> Result<()> {
-    println!("Extracting ZIP...");
-    #[cfg(windows)]
-    {
-        let status = Command::new("tar")
-            .args(&[
-                "-xf",
-                zip_path.to_str().unwrap(),
-                "-C",
-                bin_dir.to_str().unwrap(),
-            ])
-            .status();
-
-        if status.is_ok() && status.unwrap().success() {
-            return Ok(());
-        }
-
-        let status = Command::new("powershell")
-            .args(&[
-                "-Command",
-                &format!(
-                    "Expand-Archive -Path '{}' -DestinationPath '{}' -Force",
-                    zip_path.display(),
-                    bin_dir.display()
-                ),
-            ])
-            .status()
-            .context("Failed to run PowerShell for extraction")?;
-
-        if !status.success() {
-            anyhow::bail!("Failed to extract archive via PowerShell");
-        }
-    }
-    #[cfg(unix)]
-    {
-        let status = Command::new("unzip")
-            .args(&[
-                "-o",
-                zip_path.to_str().unwrap(),
-                "-d",
-                bin_dir.to_str().unwrap(),
-            ])
-            .status()
-            .context("Failed to run unzip")?;
-
-        if !status.success() {
-            anyhow::bail!("Failed to extract ZIP via unzip");
-        }
-    }
-    Ok(())
-}
-
-fn extract_tar_gz(tar_path: &Path, bin_dir: &Path) -> Result<()> {
-    println!("Extracting tar.gz...");
-    let status = Command::new("tar")
-        .args(&[
-            "-xzf",
-            tar_path.to_str().unwrap(),
-            "-C",
-            bin_dir.to_str().unwrap(),
-        ])
-        .status()
-        .context("Failed to run tar")?;
-
-    if !status.success() {
-        anyhow::bail!("Failed to extract tar.gz");
-    }
     Ok(())
 }
 
