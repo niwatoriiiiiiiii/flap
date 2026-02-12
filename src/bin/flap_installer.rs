@@ -50,7 +50,7 @@ fn real_main() -> Result<()> {
     let parent_dir = current_exe.parent().context("Failed to get parent dir")?;
     let local_bin = parent_dir.join(BIN_NAME);
 
-    if local_bin.exists() {
+    if local_bin.is_file() {
         println!("Found local binary at: {:?}", local_bin);
         println!(
             "Copying {} to {}...",
