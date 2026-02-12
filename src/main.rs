@@ -184,7 +184,9 @@ fn run_file(path: &str, config: &Config) {
             let (res, _) = interpreter.eval(&tokens);
 
             match res {
-                ExecutionResult::Ok => {}
+                ExecutionResult::Ok => {
+                    println!();
+                }
                 ExecutionResult::RuntimeError(e) => {
                     print_error(&e, &code, path, &tokens, interpreter.pc());
                     std::process::exit(1);
